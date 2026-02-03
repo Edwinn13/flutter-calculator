@@ -30,12 +30,10 @@ class CalculatorScreen extends StatefulWidget {
 }
 
 class _CalculatorScreenState extends State<CalculatorScreen> {
-  // What the user is building (accumulator)
+  // Accumulator display
   String _expression = '';
-  // Last evaluated result (shown after =)
   String _result = '';
 
-  // Prevents weird input like "++" or starting with "*"
   bool get _hasNumberAtEnd =>
       _expression.isNotEmpty && RegExp(r'[0-9)]$').hasMatch(_expression);
 
@@ -51,7 +49,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
 
   void _appendDigit(String digit) {
     setState(() {
-      // If last action was "=", and they start typing, start a new expression
+      // If last action was evaluation, starting typing begins a new expression
       if (_result.isNotEmpty && _expression.contains('=')) {
         _expression = '';
         _result = '';
@@ -77,8 +75,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   void _appendOperator(String op) {
     setState(() {
       // If user just evaluated, allow continuing from result
-      if (_expression.contains('=') && _result.isNotEmpty) {
-        _expression = _result; // continue calculation from last result
+      if (_expression.contains('=') && _result.isNotEmpty && _result != 'Error') {
+        _expression = _result;
         _result = '';
       }
 
@@ -89,7 +87,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       }
 
       if (_hasOperatorAtEnd) {
-        // replace the last operator (e.g. "5 + " then press "*" -> "5 * ")
+        // replace the last operator
         _expression = _expression.substring(0, _expression.length - 1) + op;
       } else if (_hasNumberAtEnd || _expression.endsWith(')')) {
         _expression += op;
@@ -104,8 +102,43 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     });
   }
 
+  // NEW FEATURE: square (x²) button
+  void _squareCurrent() {
+    setState(() {
+      // If the display currently contains "=result", use that result as the base
+      if (_expression.contains('=') && _result.isNotEmpty && _result != 'Error') {
+        _expression = _result;
+        _result = '';
+      }
+
+      if (_expression.isEmpty) return;
+      if (_hasOperatorAtEnd) return; // nothing to square yet
+
+      // Find the last number token (supports decimals and negative numbers)
+      final match = RegExp(r'(-?\d+(\.\d+)?)$').firstMatch(_expression);
+      if (match == null) return;
+
+      final token = match.group(0)!;
+      final value = double.tryParse(token);
+      if (value == null) return;
+
+      final squared = value * value;
+
+      String squaredText;
+      if (squared % 1 == 0) {
+        squaredText = squared.toInt().toString();
+      } else {
+        squaredText =
+            squared.toStringAsFixed(6).replaceFirst(RegExp(r'\.?0+$'), '');
+      }
+
+      _expression =
+          _expression.substring(0, _expression.length - token.length) + squaredText;
+    });
+  }
+
   String _pretty(String expr) {
-    // Optional: add spaces around operators for nicer display
+    // Add spaces around operators for nicer display
     return expr.replaceAllMapped(RegExp(r'[\+\-\*\/]'), (m) => ' ${m[0]} ');
   }
 
@@ -114,21 +147,18 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     if (_hasOperatorAtEnd) return; // don't evaluate "5+"
 
     try {
-      // Replace display operators with parser-friendly ones (we use * and / already)
       final parseMe = _expression;
 
       final expressionAst = Expression.parse(parseMe);
       final evaluator = const ExpressionEvaluator();
 
       final dynamic raw = evaluator.eval(expressionAst, {});
-
-      // Handle non-finite numbers (division by zero etc.)
       final num value = (raw is num) ? raw : num.parse(raw.toString());
+
       if (value.isNaN || value.isInfinite) {
         throw const FormatException('Math error');
       }
 
-      // Format: if it's an int, display as int. Otherwise 6 dp trimmed.
       String formatted;
       if (value % 1 == 0) {
         formatted = value.toInt().toString();
@@ -137,17 +167,15 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       }
 
       setState(() {
-        // accumulator example: "2 + 3 * 4 = 14"
         _result = formatted;
         _expression = '${_expression}=${_result}';
       });
-    } catch (e) {
+    } catch (_) {
       setState(() {
         _result = 'Error';
         _expression = '${_expression}=Error';
       });
 
-      // Also show a snackbar (nice UX)
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Invalid expression / math error')),
       );
@@ -184,9 +212,9 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme;
 
-    // Display string: show expression with spaces, or 0
-    final displayText =
-        _expression.isEmpty ? '0' : _pretty(_expression.replaceAll('=', ' = '));
+    final displayText = _expression.isEmpty
+        ? '0'
+        : _pretty(_expression.replaceAll('=', ' = '));
 
     return Scaffold(
       appBar: AppBar(
@@ -237,6 +265,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               child: Column(
                 children: [
+                  // Row 1: C, backspace, x², /
                   Row(
                     children: [
                       _btn('C',
@@ -247,49 +276,53 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                           bg: Colors.blueGrey.shade200,
                           fg: Colors.black,
                           onTap: _backspace),
+                      _btn('x²',
+                          bg: Colors.blueGrey.shade200,
+                          fg: Colors.black,
+                          onTap: _squareCurrent),
                       _btn('/',
                           bg: Colors.orange.shade600,
                           fg: Colors.white,
                           onTap: () => _appendOperator('/')),
+                    ],
+                  ),
+                  // Row 2: 7 8 9 *
+                  Row(
+                    children: [
+                      _btn('7', onTap: () => _appendDigit('7')),
+                      _btn('8', onTap: () => _appendDigit('8')),
+                      _btn('9', onTap: () => _appendDigit('9')),
                       _btn('*',
                           bg: Colors.orange.shade600,
                           fg: Colors.white,
                           onTap: () => _appendOperator('*')),
                     ],
                   ),
+                  // Row 3: 4 5 6 -
                   Row(
                     children: [
-                      _btn('7', onTap: () => _appendDigit('7')),
-                      _btn('8', onTap: () => _appendDigit('8')),
-                      _btn('9', onTap: () => _appendDigit('9')),
+                      _btn('4', onTap: () => _appendDigit('4')),
+                      _btn('5', onTap: () => _appendDigit('5')),
+                      _btn('6', onTap: () => _appendDigit('6')),
                       _btn('-',
                           bg: Colors.orange.shade600,
                           fg: Colors.white,
                           onTap: () => _appendOperator('-')),
                     ],
                   ),
+                  // Row 4: 1 2 3 +
                   Row(
                     children: [
-                      _btn('4', onTap: () => _appendDigit('4')),
-                      _btn('5', onTap: () => _appendDigit('5')),
-                      _btn('6', onTap: () => _appendDigit('6')),
+                      _btn('1', onTap: () => _appendDigit('1')),
+                      _btn('2', onTap: () => _appendDigit('2')),
+                      _btn('3', onTap: () => _appendDigit('3')),
                       _btn('+',
                           bg: Colors.orange.shade600,
                           fg: Colors.white,
                           onTap: () => _appendOperator('+')),
                     ],
                   ),
-                  Row(
-                    children: [
-                      _btn('1', onTap: () => _appendDigit('1')),
-                      _btn('2', onTap: () => _appendDigit('2')),
-                      _btn('3', onTap: () => _appendDigit('3')),
-                      _btn('=',
-                          bg: Colors.green.shade700,
-                          fg: Colors.white,
-                          onTap: _evaluate),
-                    ],
-                  ),
+                  // Row 5: 0 . =
                   Row(
                     children: [
                       _btn('0', wide: true, onTap: () => _appendDigit('0')),
